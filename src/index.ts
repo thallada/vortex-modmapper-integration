@@ -5,8 +5,7 @@ import { loadWasm } from "./wasmLoader";
 const supportedGames: string[] = [ 'skyrimse', 'skyrimspecialedition', 'skyrimvr' ];
 const modMapperBase: string = 'https://modmapper.com/';
 
-// Added gameId for future use?
-const modmapperModUrl = (gameId: string, modId: number): string => `${modMapperBase}?mod=${modId}`;
+const modmapperModUrl = (gameId: string, modId: number): string => `${modMapperBase}?mod=${modId}&game=${gameId}`;
 
 function pluginPath(pluginName : string, api : types.IExtensionApi): string {
     const store = api.store
