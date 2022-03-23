@@ -1,3 +1,3 @@
-export function loadWasm(closure) {
-  import("skyrim-cell-dump-wasm").then(closure);
+export function loadWasm() {
+  return import("skyrim-cell-dump-wasm");
 }

@@ -2,21 +2,27 @@ import { log, selectors, types, util } from "vortex-api";
 import { IExtensionContext } from 'vortex-api/lib/types/api';
 import { loadWasm } from "./wasmLoader";
 
+const fs = require('fs');
+const path = require('path');
+
 const supportedGames: string[] = [ 'skyrimse', 'skyrimspecialedition', 'skyrimvr' ];
 const modMapperBase: string = 'https://modmapper.com/';
 
 const modmapperModUrl = (gameId: string, modId: number): string => `${modMapperBase}?mod=${modId}&game=${gameId}`;
+const modmapperPluginUrl = (hash: string): string => `${modMapperBase}?plugin=${hash}`;
 
-function pluginPath(pluginName : string, api : types.IExtensionApi): string {
+function pluginPath(pluginName: string, api: types.IExtensionApi): string {
     const store = api.store
     const activeGameId = selectors.activeGameId(store.getState());
   
     const gamePath = util.getSafe(store.getState(), ['settings', 'gameMode', 'discovered', activeGameId, 'path'], undefined);
-    return `${gamePath}${pluginName}`;
+    return path.join(gamePath, 'Data', pluginName);
 }
 
 //This is the main function Vortex will run when detecting the game extension. 
 function main(context: IExtensionContext) {
+    let hash_plugin = null;
+    loadWasm().then((wasm) => hash_plugin = wasm.hash_plugin);
     
     // Add button to the mods table.
     context.registerAction('mods-action-icons', 999, 'highlight-map', {}, 'See on Modmapper',
@@ -30,7 +36,6 @@ function main(context: IExtensionContext) {
             // Is this mod from gather the info about the mod.
             const game: string = mod.attributes?.downloadGame;
             const modId: number = mod.attributes?.modId;
-            loadWasm(({ hash_plugin }) => alert(hash_plugin(new Uint8Array([1, 2, 3]))));
             return util.opn(modmapperModUrl(game, modId)).catch((err) => log('error', 'Could not open web page', err));            
         },
         (instanceIds: string[]): boolean => {
@@ -51,12 +56,30 @@ function main(context: IExtensionContext) {
     );
 
     // Add button to the plugins table.
-    context.registerAction('gamebryo-plugins-action-icons', 100, 'highlight-map', {}, 'See on Modmapper',
+    context.registerAction('gamebryo-plugins-action-icons', 100, 'highlight-map', {}, ' See on Modmapper',
         (instanceIds: string[]) => {
-            alert(pluginPath(instanceIds[0], context.api));
+            const pluginData = util.getSafe(context.api.store.getState(), ['session', 'plugins', 'pluginInfo', instanceIds[0].toLowerCase()], undefined);
+            fs.readFile(pluginData?.filePath ?? pluginPath(instanceIds[0], context.api), (err, data) => {
+                if (err) {
+                    alert('Failed to read plugin: ' + err);
+                    throw err;
+                }
+
+                if (hash_plugin === null) {
+                    throw new Error('Failed to load WebAssembly module. Cannot hash plugin.');
+                }
+                const hash = hash_plugin(Uint8Array.from(Buffer.from(data))).toString(36); 
+                util.opn(modmapperPluginUrl(hash)).catch((err) => log('error', 'Could not open web page', err));            
+            })
+            
         },
         (instanceIds: string[]) => {
-            return true;
+            // Should we show the option?
+            const state = context.api.getState();
+            const gameId: string = selectors.activeGameId(state);
+            // Make sure active game is a supported game
+            const gameIsSupported: boolean = supportedGames.includes(gameId);
+            return gameIsSupported;
         },
     );
 
