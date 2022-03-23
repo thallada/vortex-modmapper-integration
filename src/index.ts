@@ -8,6 +8,14 @@ const path = require('path');
 const supportedGames: string[] = [ 'skyrimse', 'skyrimspecialedition', 'skyrimvr' ];
 const modMapperBase: string = 'https://modmapper.com/';
 
+const excludedPlugins = [
+    "Skyrim.esm",
+    "Update.esm",
+    "Dawnguard.esm",
+    "HearthFires.esm",
+    "Dragonborn.esm",
+].map(s => s.toLowerCase());
+
 const modmapperModUrl = (gameId: string, modId: number): string => `${modMapperBase}?mod=${modId}&game=${gameId}`;
 const modmapperPluginUrl = (hash: string): string => `${modMapperBase}?plugin=${hash}`;
 
@@ -56,7 +64,7 @@ function main(context: IExtensionContext) {
     );
 
     // Add button to the plugins table.
-    context.registerAction('gamebryo-plugins-action-icons', 100, 'highlight-map', {}, ' See on Modmapper',
+    context.registerAction('gamebryo-plugins-action-icons', 999, 'highlight-map', {}, ' See on Modmapper',
         (instanceIds: string[]) => {
             const pluginData = util.getSafe(context.api.store.getState(), ['session', 'plugins', 'pluginInfo', instanceIds[0].toLowerCase()], undefined);
             fs.readFile(pluginData?.filePath ?? pluginPath(instanceIds[0], context.api), (err, data) => {
@@ -79,7 +87,9 @@ function main(context: IExtensionContext) {
             const gameId: string = selectors.activeGameId(state);
             // Make sure active game is a supported game
             const gameIsSupported: boolean = supportedGames.includes(gameId);
-            return gameIsSupported;
+
+            const excluded = excludedPlugins.includes(instanceIds[0].toLowerCase());
+            return gameIsSupported && !excluded;
         },
     );
 
