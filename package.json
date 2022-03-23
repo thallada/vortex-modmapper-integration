@@ -1,7 +1,7 @@
 {
-  "name": "modmapper-integration",
+  "name": "vortex-modmapper-integration",
   "version": "0.0.1",
-  "description": "Allow mods and plugins to be opened with ModMapper",
+  "description": "Allow mods and plugins to be opened with Modmapper",
   "main": "./dist/index.js",
   "scripts": {
     "webpack": "node ./node_modules/webpack/bin/webpack --config webpack.config.js --display-error-details --progress --profile --color",
