@@ -16,6 +16,11 @@ const excludedPlugins = [
     "Dragonborn.esm",
 ].map(s => s.toLowerCase());
 
+const gameIdConversions = {
+    'skyrimse': 'skyrimspecialedition',
+    'skyrimvr': 'skyrimspecialedition',
+};
+
 const modmapperModUrl = (gameId: string, modId: number): string => `${modMapperBase}?mod=${modId}&game=${gameId}`;
 const modmapperPluginUrl = (hash: string): string => `${modMapperBase}?plugin=${hash}`;
 
@@ -41,8 +46,11 @@ function main(context: IExtensionContext) {
             const mod = util.getSafe(state, ['persistent', 'mods', gameId, instanceIds[0]], undefined);
             // could not find the mod in the state. 
             if (!mod) return;
-            // Is this mod from gather the info about the mod.
-            const game: string = mod.attributes?.downloadGame;
+            // Get nexus game id for the mod.
+            const downloadGame: string = mod.attributes?.downloadGame;
+            const knownGames = util.getSafe(state, ['session', 'gameMode', 'known'], []);
+            const game = knownGames.find(g => g.id === downloadGame)?.details?.nexusPageId ?? gameIdConversions[downloadGame] ?? downloadGame;
+
             const modId: number = mod.attributes?.modId;
             return util.opn(modmapperModUrl(game, modId)).catch((err) => log('error', 'Could not open web page', err));            
         },
