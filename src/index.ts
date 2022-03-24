@@ -1,5 +1,5 @@
 import { log, selectors, types, util } from "vortex-api";
-import { IExtensionContext } from 'vortex-api/lib/types/api';
+import { IExtensionContext, INotification } from 'vortex-api/lib/types/api';
 import { loadWasm } from "./wasmLoader";
 
 const fs = require('fs');
@@ -21,10 +21,13 @@ const gameIdConversions = {
     'skyrimvr': 'skyrimspecialedition',
 };
 
-const modmapperModUrl = (gameId: string, modId: number): string => `${modMapperBase}?mod=${modId}&game=${gameId}`;
+let hash_plugin = null;
+const pluginHashes = {};
+
+const modmapperModUrl = (gameId: string, modId: number): string => `${modMapperBase}?game=${gameId}&mod=${modId}`;
 const modmapperPluginUrl = (hash: string): string => `${modMapperBase}?plugin=${hash}`;
 
-function pluginPath(pluginName: string, api: types.IExtensionApi): string {
+function guessPluginPath(pluginName: string, api: types.IExtensionApi): string {
     const store = api.store
     const activeGameId = selectors.activeGameId(store.getState());
   
@@ -32,9 +35,42 @@ function pluginPath(pluginName: string, api: types.IExtensionApi): string {
     return path.join(gamePath, 'Data', pluginName);
 }
 
-//This is the main function Vortex will run when detecting the game extension. 
+function hashPlugin(pluginName: string, api: types.IExtensionApi): Promise<string> {
+    const pluginData = util.getSafe(api.store.getState(), ['session', 'plugins', 'pluginInfo', pluginName.toLowerCase()], undefined);
+    const pluginPath = pluginData?.filePath ?? guessPluginPath(pluginName, api)
+    return new Promise(async (resolve, reject) => {
+        fs.readFile(pluginPath, async (err, data) => {
+            if (err) {
+                alert('Failed to read plugin: ' + err);
+                reject(err);
+                return;
+            }
+
+            if (typeof hash_plugin !== 'function') {
+                // Wait a bit for wasm to get loaded before giving up
+                try {
+                    await new Promise<void>(resolve => setTimeout(() => {
+                        if (typeof hash_plugin !== 'function') {
+                            reject(new Error('Failed to load WebAssembly module. Cannot hash plugin.'));
+                            return;
+                        }
+                        resolve();
+                    }, 1000));
+                } catch (err) {
+                    reject(err);
+                    return;
+                }
+            }
+            const hash = hash_plugin(new Uint8Array(data.buffer, data.buffer.byteOffset, data.buffer.length)).toString(36); 
+            resolve(hash);
+        })
+    });
+}
+
+// This is the main function Vortex will run when detecting the game extension. 
 function main(context: IExtensionContext) {
-    let hash_plugin = null;
+    // WebAssembly must be loaded asynchronously in this environment (avoids blocking main thread),
+    // so load it here during plugin initialization and save the wasm function in the scope to use in event handlers.
     loadWasm().then((wasm) => hash_plugin = wasm.hash_plugin);
     
     // Add button to the mods table.
@@ -74,19 +110,25 @@ function main(context: IExtensionContext) {
     // Add button to the plugins table.
     context.registerAction('gamebryo-plugins-action-icons', 999, 'highlight-map', {}, ' See on Modmapper',
         (instanceIds: string[]) => {
-            const pluginData = util.getSafe(context.api.store.getState(), ['session', 'plugins', 'pluginInfo', instanceIds[0].toLowerCase()], undefined);
-            fs.readFile(pluginData?.filePath ?? pluginPath(instanceIds[0], context.api), (err, data) => {
-                if (err) {
-                    alert('Failed to read plugin: ' + err);
-                    throw err;
-                }
+            if (pluginHashes[instanceIds[0]]) {
+                util.opn(modmapperPluginUrl(pluginHashes[instanceIds[0]])).catch((err) => log('error', 'Could not open web page', err));            
+            } else {
+                const notification: INotification = {
+                    type: 'activity',
+                    message: 'Generating the unique id for this plugin...',
+                    title: 'Hashing plugin',
+                };
+                const notificationId = context.api.sendNotification(notification);
 
-                if (hash_plugin === null) {
-                    throw new Error('Failed to load WebAssembly module. Cannot hash plugin.');
-                }
-                const hash = hash_plugin(Uint8Array.from(Buffer.from(data))).toString(36); 
-                util.opn(modmapperPluginUrl(hash)).catch((err) => log('error', 'Could not open web page', err));            
-            })
+                hashPlugin(instanceIds[0], context.api).then(hash => {
+                    pluginHashes[instanceIds[0]] = hash;
+                    context.api.dismissNotification(notificationId);
+                    util.opn(modmapperPluginUrl(hash)).catch((err) => log('error', 'Could not open web page', err));            
+                }).catch(err => {
+                    context.api.dismissNotification(notificationId);
+                    throw(err);
+                });
+            }
             
         },
         (instanceIds: string[]) => {
@@ -95,8 +137,12 @@ function main(context: IExtensionContext) {
             const gameId: string = selectors.activeGameId(state);
             // Make sure active game is a supported game
             const gameIsSupported: boolean = supportedGames.includes(gameId);
-
+            // Make sure not a built-in game plugin
             const excluded = excludedPlugins.includes(instanceIds[0].toLowerCase());
+
+            // TODO: if this is true, spin up child processes to compute the hash and cache it for later.
+            // Will need to use a worker pool with queue of plugins to prevent overloading CPU.
+            // (running on the main thread causes the UI to lock up)
             return gameIsSupported && !excluded;
         },
     );
